@@ -1,0 +1,963 @@
+package norms;
+
+import java.util.*;
+
+/**
+ * Created by XXX on 7/7/17.
+ * Implemented: Polpitiya, L. G. (2017). Efficient Computation of Belief Theoretic Conditionals, 62, 265–276.
+ */
+public class DSFrame {
+
+    private List<Integer> power; // Lookup table containing location of singletons in the DSVector
+    private int numberOfSingletons;
+    private List<String> singletons;  // List of lowercased singletons of size n. The index of these singletons is important.
+    private List<Double> massesDSVector; // The actual DSVector with masses (unnormalized)
+    private static long count=0L;
+    private long frameId;
+
+    //****************** CONSTRUCTORS ************************************//
+    /**
+     * Constructor given a BoE = {Theta, Focals, massFunction}
+     * @param singletons
+     * @param focals
+     * @param massFunction
+     */
+    public DSFrame (List<String> singletons, List<List<String>> focals, List<Double> massFunction){
+        singletons.stream().map(string -> string.toLowerCase()); // converts all singletons to lower case
+        this.singletons = singletons;
+        this.numberOfSingletons = singletons.size();
+        int sizeOfPowerSet = (int) Math.pow(2,this.numberOfSingletons);
+        this.massesDSVector = new ArrayList<Double>(Collections.nCopies(sizeOfPowerSet, 0.0)); // populates the masses with 0.0
+        // TODO: This might computationally intensive. Look into using Hashmaps to store masses, keyed to indexes. Then no need to initialize
+        initializePower();
+
+        // Initializing masses
+        if (focals.size() == massFunction.size()){
+            for (int i = 0; i<focals.size(); i++){
+                setMass(focals.get(i),massFunction.get(i));
+            }
+        } else {
+
+        }
+
+        //setting frame id
+        this.frameId = ++count;
+    }
+
+    /**
+     * Constructor function that initializes the DSFrame given a list of singletons.
+     * @param singletons
+     */
+    public DSFrame(List<String> singletons){
+        singletons.stream().map(string -> string.toLowerCase()); // converts all singletons to lower case
+        this.singletons = singletons;
+        this.numberOfSingletons = singletons.size();
+        int sizeOfPowerSet = (int) Math.pow(2,this.numberOfSingletons);
+        this.massesDSVector = new ArrayList<Double>(Collections.nCopies(sizeOfPowerSet, 0.0)); // populates the masses with 0.0
+        // TODO: This might computationally intensive. Look into using Hashmaps to store masses, keyed to indexes. Then no need to initialize
+        initializePower();
+
+
+        //setting frame id
+        this.frameId = ++count;
+    }
+    //**********************************************************************//
+
+
+
+    //****************** GENERAL FRAME STUFF ************************************//
+    /**
+     * Returns the singletons in the FoD.
+     * @return
+     */
+    public List<String> getSingletons(){
+        return this.singletons;
+    }
+
+    /**
+     * Returns the lookup table called "Power"
+     * @return
+     */
+    public List<Integer> getPower(){
+        return this.power;
+    }
+
+    /**
+     * Returns propositions (list of singleton strings) with non-zero masses along with their respective masses.
+     * @return
+     */
+    public Map<List<String>,Double> getCore() {
+        // Go through massesDSVector and get indices for non-zero elements
+        // For each non-zero element, identify the bit location of singletons
+        Map<List<String>, Double> core = new HashMap<>();
+
+        for (int i = 0; i<this.massesDSVector.size(); i++){
+            if (this.massesDSVector.get(i) < 0.0001){
+            } else {
+                List<String> proposition = getProposition(i);
+                core.put(proposition,this.massesDSVector.get(i));
+            }
+
+        }
+        return core;
+    }
+
+    /**
+     * Returns propositions that have non-zero beliefs
+     * @return
+     */
+    public Map<List<String>,Double> getBeliefCore() {
+        Map<List<String>, Double> beliefCore = new HashMap<>();
+
+        for (int i = 0; i<this.massesDSVector.size(); i++){
+            if (getBelief(getProposition(i)) < 0.0001){
+            } else {
+                List<String> proposition = getProposition(i);
+                beliefCore.put(proposition,getBelief(getProposition(i)));
+            }
+
+        }
+        return beliefCore;
+    }
+
+    /**
+     * Returns a proposition (list of singleton strings), given an index in the masses DS Vector
+     * @param in
+     * @return
+     */
+    public List<String> getProposition(int in){
+        // Create a bitset:
+        BitSet bits = new BitSet(this.singletons.size());
+        int index = 0;
+        while (in != 0) {
+            if (in % 2 != 0) {
+                bits.set(index);
+            }
+            ++index;
+            in = in >>> 1;
+        }
+        List<String> proposition = new ArrayList<>();
+        for (int i = bits.nextSetBit(0); i != -1; i = bits.nextSetBit(i + 1)) {
+            proposition.add(this.singletons.get(i));
+        }
+        return proposition;
+    }
+
+    /**
+     * Returns the id of a frame. The id is automatically created at instantiation.
+     * Each instance of the frame has a new frame id.
+     * @return
+     */
+    public long getFrameId(){
+        return this.frameId;
+    }
+
+    //**********************************************************************//
+
+
+
+
+    //****************** SET/GET MASSES ************************************//
+    /**
+     * sets mass for a specific singleton
+     * @param singleton
+     * @param mass
+     */
+    public void setMass(String singleton, double mass){
+        singleton.toLowerCase(); //NEW
+        List<String> listForm = new ArrayList<>();
+        listForm.add(singleton);
+        setMass(listForm,mass);
+    }
+
+    /**
+     * Sets mas for a proposition (list of singleton)
+     * @param proposition
+     * @param mass
+     */
+    public void setMass(List<String> proposition, double mass){
+        proposition.stream().map(string -> string.toLowerCase()); //NEW
+        int index = accessMass(proposition); // Access the corresponding location in the DSVector
+        this.massesDSVector.set(index,mass);
+    }
+
+    /**
+     * Essentially loads a BoE = (Focals, masses) for a given frame.
+     * If you want to initialize a new frame with a BoE then need to use the constructor.
+     * @param masses
+     */
+    public void setMasses(Map<List<String>,Double> masses){
+        // TODO: Need to test this method.
+        for (Map.Entry<List<String>,Double> entry : masses.entrySet()){
+            entry.getKey().stream().map(string -> string.toLowerCase()); //NEW
+            setMass(entry.getKey(),entry.getValue());
+        }
+    }
+
+    /**
+     * Get mass for a particular singleton.
+     * @param singleton
+     * @return
+     */
+    public double getMass(String singleton){
+        singleton.toLowerCase(); //NEW
+        List<String> listForm = new ArrayList<>();
+        listForm.add(singleton);
+        return getMass(listForm);
+    }
+
+    /**
+     * Get mass for a proposition (list of singletons).
+     * @param proposition
+     * @return
+     */
+    public double getMass(List<String> proposition){
+        proposition.stream().map(string -> string.toLowerCase()); //NEW
+        int index = accessMass(proposition);
+        return this.massesDSVector.get(index);
+    }
+
+    /**
+     * Returns the entire DSVector containing masses for all propositions in the frame.
+     * @return
+     */
+    public List<Double> getAllMasses(){
+        return this.massesDSVector;
+    }
+
+    /**
+     * Returns normalized mass for a singleton.
+     * @param singleton
+     * @return
+     */
+    public double getNormalizedMass(String singleton){
+        singleton.toLowerCase(); //NEW
+        return getMass(singleton)/getNormalizingConstant();
+    }
+
+    /**
+     * Returns the normalized mass for a proposition.
+     * @param proposition
+     * @return
+     */
+    public double getNormalizedMass(List<String> proposition){
+        proposition.stream().map(string -> string.toLowerCase()); //NEW
+        return getMass(proposition)/getNormalizingConstant();
+    }
+
+    /**
+     * Returns all normalized masses. Masses for all propositions in the frame.
+     * @return
+     */
+    public List<Double> getAllNormalizedMasses(){
+        List<Double> normalizedMasses = new ArrayList<>();
+        for (double mass : this.massesDSVector){
+            double nMass = mass/getNormalizingConstant();
+            normalizedMasses.add(nMass);
+        }
+        return normalizedMasses;
+    }
+
+    /**
+     * Clears all masses in the DSVector.
+     * Useful when conditioning and updating.
+     */
+    public void clearMasses(){
+        int sizeOfPowerSet = (int) Math.pow(2,this.numberOfSingletons);
+        this.massesDSVector = new ArrayList<Double>(Collections.nCopies(sizeOfPowerSet, 0.0)); // populates the masses with 0.0
+    }
+
+    /**
+     * Returns the sum of masses in the DS-Vector.
+     * The Masses DSVector is unnormalized and so will need to be divided by this normalizing constant.
+     * See the toString() method for the use of the normalizing constant.
+     * @return
+     */
+    public double getNormalizingConstant(){
+        double sum = 0;
+        for (double entry : this.massesDSVector){
+            sum = sum + entry;
+        }
+        return sum;
+    }
+    //**********************************************************************//
+
+
+
+
+    //****************** SET/GET BELIEFS, PLAUSIBILITIES, STRADDLE ************************************//
+    /**
+     * Returns the belief of a proposition.
+     * @param proposition
+     * @return
+     */
+    public double getBelief(List<String> proposition){
+        proposition.stream().map(string -> string.toLowerCase()); // NEW
+        // Generate list of relevant indices to add over
+        int count = 0;
+        List<Integer> index = new ArrayList<>();
+        for (String singleton : proposition){
+            index.add(power.get(singletons.indexOf(singleton)));
+            count += 1;
+            int temp = count -1;
+            for (int j =0; j<temp; j++){
+                int val = index.get(j) + power.get(singletons.indexOf(singleton));
+                index.add(val);
+                count += 1;
+            }
+        }
+        double belief = 0.0;
+        for (int i =0; i < index.size() ;i++){
+            belief = belief + this.massesDSVector.get(index.get(i));
+        }
+        double normalizingConstant = this.getNormalizingConstant();
+        return belief/normalizingConstant;
+    }
+
+    /**
+     * Returns the plausibility of a proposition.
+     * @param proposition
+     * @return
+     */
+    public double getPlausibility(List<String> proposition){
+        proposition.stream().map(string -> string.toLowerCase()); //NEW
+        List<String> complement = this.getComplement(proposition);
+        return 1 - this.getBelief(complement);
+        // TODO: An issue with this calculation showed up once. Need to verify this more carefully.
+    }
+
+    /**
+     * Sets masses in the DSVector based on supplied belief values.
+     * Uses Mobius Transform to accomplish this mapping.
+     * See Page 39, Theorem 2.2 in Shafer, G., "A Mathematical Theory of Evidence," 1976.
+     * @param beliefs
+     */
+    public void setBeliefs(Map<List<String>,Double> beliefs){
+        // Beliefs are provided as a Map<Proposition, belief>
+        // For each proposition, we find its power set and then do the Mobius transform.
+        for (Map.Entry<List<String>,Double> entry : beliefs.entrySet()){
+            entry.getKey().stream().map(string -> string.toLowerCase()); //NEW
+            List<List<String>> powerSet = getPowerSet(entry.getKey());
+            double sum = 0.0;
+            for (List<String> element : powerSet){
+                if (!element.isEmpty()){
+                    int cardDiff = entry.getKey().size() - element.size();
+                    if (beliefs.containsKey(element)){
+                        sum = sum + Math.pow(-1,cardDiff) * beliefs.get(element);
+                    }
+                }
+            }
+            // The sum provides us with the mass of the corresponding proposition.
+            if (sum > 0.0){
+                setMass(entry.getKey(),sum);
+            }
+        }
+    }
+
+    /**
+     * Returns a map containing beliefs from the core
+     * @return
+     */
+    public Map<List<String>,Double> getBeliefsFromCore(){
+        Map<List<String>,Double> beliefsCore = new HashMap<>();
+        for (Map.Entry<List<String>,Double> entry : getCore().entrySet()){
+            double bel = getBelief(entry.getKey());
+            beliefsCore.put(entry.getKey(),bel);
+        }
+        return beliefsCore;
+    }
+
+    // TODO: needs to be tested
+    public void setPlausibilities(Map<List<String>,Double> pls){
+        // Use the role that Bel(A') = 1 - Pl(A). Where A' is a complement of A.
+        Map<List<String>,Double> beliefs = new HashMap<>();
+        for (Map.Entry<List<String>,Double> entry : pls.entrySet()){
+            entry.getKey().stream().map(string -> string.toLowerCase()); //NEW
+            List<String> complement = this.getComplement(entry.getKey());
+            Double value = 1 - entry.getValue();
+            beliefs.put(complement,value);
+        }
+        setBeliefs(beliefs);
+    }
+
+    /**
+     * Returns the cummulative mass (a.k.a. "straddle") of two propositions in a frame.
+     * Refer to Wikramaratne thesis for formal definition of straddle.
+     * Wickramarathne, T. L. (2012). An analytical framework for soft and hard data fusion:
+     * *** A Dempster-Shafer belief theoretic approach. ProQuest Dissertations and Theses.
+     * @param propA
+     * @param propB
+     * @return
+     */
+    public double getStraddle(List<String> propA, List<String> propB){
+        propA.stream().map(string -> string.toLowerCase()); //NEW
+        propB.stream().map(string -> string.toLowerCase()); //NEW
+        // Get the power sets for the propositions.
+        List<List<String>> powerA = getPowerSet(propA);
+        List<List<String>> powerB = getPowerSet(propB);
+
+        // Compute union power set
+        HashSet<List<String>> set = new HashSet<>();
+        set.addAll(powerA);
+        set.addAll(powerB);
+        List<List<String>> unionPower = new ArrayList<>(set);
+
+        // Iterate through this and add all the masses
+        double sum = 0.0;
+        for (List<String> prop : unionPower){
+            if (!prop.isEmpty()){
+                sum = sum + getMass(prop);
+            }
+        }
+        return sum;
+    }
+    //**********************************************************************//
+
+
+
+
+    //****************** CONDITIONING **********************************************//
+    //TODO: having trouble with the "Fast" belief method.
+    /**
+     * Returns the Conditional Belief (Fagin-Halpern) Bel(proposition | conditioningEvent)
+     * This one implements the straddle
+     * @param propositionB
+     * @param conditioningEventA
+     * @return
+     */
+    public double getFHConditionalBelFast(List<String> propositionB, List<String> conditioningEventA){
+        propositionB.stream().map(string -> string.toLowerCase()); //NEW
+        conditioningEventA.stream().map(string -> string.toLowerCase()); //NEW
+        // B INT A
+        List<String> propIntEvent = getIntersection(propositionB,conditioningEventA);
+        // A complement
+        List<String> eventComplement = getComplement(conditioningEventA);
+
+        // Bel(B | A). Per Proposition 6
+        double bel = getBelief(propIntEvent)/(1 - getBelief(eventComplement) - getStraddle(eventComplement,propIntEvent));
+        return bel;
+    }
+
+    /**
+     * Returns the Conditional Belief (Fagin-Halpern) Bel(proposition | conditioningEvent)
+     * @param propositionB
+     * @param conditioningEventA
+     * @return
+     */
+    public double getFHConditionalBel(List<String> propositionB, List<String> conditioningEventA){
+        propositionB.stream().map(string -> string.toLowerCase()); //NEW
+        conditioningEventA.stream().map(string -> string.toLowerCase()); //NEW
+        // B INT A
+        List<String> propIntEvent = getIntersection(propositionB,conditioningEventA);
+        // A complement
+        List<String> eventComplement = getComplement(conditioningEventA);
+        // B Complement
+        List<String> propBComplement = getComplement(propositionB);
+        // A INT B complement
+        List<String> eventIntPropBComp = getIntersection(conditioningEventA,propBComplement);
+
+        // Bel(B | A). Per Proposition 6
+        double bel = getBelief(propIntEvent)/(getBelief(propIntEvent) + getPlausibility(eventIntPropBComp));
+        return bel;
+    }
+
+    /**
+     * Returns the conditional core per Conditional Core Theorem (CCT).
+     * The conditional core should be the same as the core after conditioning.
+     * @param eventA
+     * @return
+     */
+    public Map<List<String>,Double> getConditionalCore(List<String> eventA) {
+        Map<List<String>, Double> core = new HashMap<>();
+
+        // get in(EventA), OUT(eventA), and their union
+        List<List<String>> in = this.getIn(eventA);
+        List<List<String>> arbOut = this.getArbUnion(this.getOut(eventA));
+        List<List<String>> inUnionArbOut = this.getGenUnion(in,arbOut);
+
+        // Iterate through "in()"
+        for (List<String> item : in){
+            core.put(item,this.getMass(item));
+        }
+        //Iterate through "in-Union-arbOut()"
+        for (List<String> itemB : inUnionArbOut){
+            core.put(itemB,this.getMass(itemB));
+        }
+        return core;
+    }
+    //**********************************************************************//
+
+
+
+
+
+    //****************** UPDATE / COMBINATION **********************************************//
+    /**
+     * Updates the entire frame based on a conditioning event using Fagin-Halpern conditionals.
+     * @param conditioningEvent
+     */
+    public void fHConditionalUpdate(List<String> conditioningEvent){
+        conditioningEvent.stream().map(string -> string.toLowerCase()); //NEW
+        Map<List<String>,Double> beliefs = new HashMap<>();
+        for (int i = 1; i<this.massesDSVector.size(); i++){
+            List<String> prop = getProposition(i);
+            if (conditioningEvent.containsAll(prop)){
+                // Calculate conditional belief
+                double bel = getFHConditionalBel(prop,conditioningEvent);
+                beliefs.put(prop,bel);
+            }
+        }
+        clearMasses();
+        setBeliefs(beliefs);
+    }
+
+    // TODO: Needs to be tested.
+    /**
+     * Updates current frame with evidence from newFrame using the fHConditioningUpdate and Evidence Update equations.
+     * REQUIRES: incoming frame to be identical to the current frame.
+     * REQUIRES: conditioning event to be a focal element of the incoming frame.
+     * newFrame represents a fresh BoE completely overlapping with current frame. i.e., identical frames.
+     * newEvidence weight allows for assigning
+     * @param newFrame
+     * @param conditioningEventA
+     * @param newEvidenceWeight
+     * @return
+     */
+    public boolean evidenceUpdate(DSFrame newFrame, List<String> conditioningEventA, double newEvidenceWeight){
+        if (newEvidenceWeight > 1.0) return false;
+
+        // Check if the incoming frame is identical to the current frame
+        if (listEqualsNoOrder(newFrame.getSingletons(),this.getSingletons())){
+            Map<List<String>,Double> focals =  newFrame.getCore(); // get the focals. The conditioning event is in the focals
+
+            // Temporarily convert focals to a different data structure (from List to sets)
+            // Lists bring in some order effects which we want to avoid.
+            Map<Set<String>,Double> focalsSet = new HashMap<>();
+            for (Map.Entry<List<String>,Double> entry : newFrame.getCore().entrySet()){
+                Set<String> propSet = new HashSet<>(entry.getKey());
+                focalsSet.put(propSet,entry.getValue());
+            }
+
+            // Check if conditioning event is in the focals
+            if (!focalsSet.containsKey(new HashSet<>(conditioningEventA))){
+                return false;
+            } else {
+                // Do the update for the new frame: Bel ( . | A)
+
+                //newFrame.fHConditionalUpdate(conditioningEventA);
+
+
+
+
+//                System.out.println("Conditional Core (before update): "+this.getConditionalCore(conditioningEventA));
+//                System.out.println("Actual Core (before update): "+this.getCore());
+
+                //TODO: May NOT need to update everything. This is where I should be selective to speed things up
+
+
+                // ****************************
+//                // ALGORITHM: do the update equation in separate parts (derive two belief maps - old, conditional) and then add them
+//                // (1) ** Get the current belief map from the frame
+//                Map<List<String>,Double> currentBeliefs = getBeliefsFromCore();
+//                System.out.println("Current beliefs = "+currentBeliefs);
+//
+//                // (2) ** Determine fhconditional for the newFrame's conditional core only on the newFrame
+//                System.out.println("Conditioning Event = "+conditioningEventA);
+//                System.out.println("Conditional Core = "+newFrame.getConditionalCore(conditioningEventA));
+//                Map<List<String>,Double> conditionalBeliefs = new HashMap<>();
+//                for (Map.Entry<List<String>,Double> entry : newFrame.getConditionalCore(conditioningEventA).entrySet()){
+//                    double conditionalBel = newFrame.getFHConditionalBel(entry.getKey(),conditioningEventA);
+//                    conditionalBeliefs.put(entry.getKey(),conditionalBel);
+//                }
+//                System.out.println("Cond beliefs = "+conditionalBeliefs);
+//
+//                // (5) ** Do the weighted sum of the two belief maps.
+//                //Map<List<String>,Double> updatedBeliefs = new HashMap<>();
+//
+//                Map<List<String>,Double> updatedBeliefs = weightedAddValues(currentBeliefs,conditionalBeliefs,(1 - newEvidenceWeight),newEvidenceWeight);
+//                System.out.println("updated beliefs = "+updatedBeliefs);
+                // ****************************
+
+
+
+                // ***********FASTER WAY (with conditional core) ****************************
+                // --- still not super fast because computing the core is time consuming.
+                // need a separate representation for the core. During any frame update, the core is
+
+
+                //(1) Compute the conditional beliefs for only those in newFrame's conditional core
+                //  -- Also update the newFrame with the conditional update.
+                Map<List<String>,Double> conditionalBeliefs = new HashMap<>();
+                // We only need to update those items in the conditional core, thanks to CCT!
+                for (Map.Entry<List<String>,Double> entry : newFrame.getConditionalCore(conditioningEventA).entrySet()){
+                    double conditionalBel = newFrame.getFHConditionalBel(entry.getKey(),conditioningEventA);
+                    conditionalBeliefs.put(entry.getKey(),conditionalBel);
+                }
+                newFrame.clearMasses();
+                newFrame.setBeliefs(conditionalBeliefs);
+                //System.out.println("New Frame = "+newFrame.getBeliefCore());
+                Map<List<String>,Double> updatedConditionalBeliefs = newFrame.getBeliefCore();
+
+                // (2) Iterate through all the elements in the current frame and compute the current beliefs
+                Map<List<String>,Double> currentBeliefs = getBeliefCore(); //All non-zero beliefs
+                //System.out.println("Current beliefs = "+currentBeliefs);
+
+                // (3) Iterate through these currentBeliefs and update them as needed and then add new beliefs from conditional core
+                Map<List<String>,Double> updatedBeliefs = new HashMap<>(currentBeliefs);
+
+                for (Map.Entry<List<String>,Double> entry : updatedBeliefs.entrySet()){
+                    double update = (1-newEvidenceWeight) * entry.getValue();
+                    updatedBeliefs.put(entry.getKey(),update);
+                }
+
+                for (List<String> prop : updatedConditionalBeliefs.keySet()) {
+                    if (updatedBeliefs.containsKey(prop)) {
+                        double updatedBel = updatedBeliefs.get(prop) + newEvidenceWeight * newFrame.getBelief(prop);
+
+                        updatedBeliefs.put(prop, updatedBel);
+                    } else {
+                        updatedBeliefs.put(prop, newEvidenceWeight * newFrame.getBelief(prop));
+                    }
+                }
+                //System.out.println("updated beliefs = "+updatedBeliefs);
+                // ****************************
+
+
+
+                // ***********THE BRUTE FORCE WAY ****************************
+//                Map<List<String>,Double> updatedBeliefs = new HashMap<>();
+//                for (int i = 1; i<this.massesDSVector.size(); i++){
+//                    List<String> prop = getProposition(i);
+//
+//                    log.debug("New BoE Core: "+newFrame.getCore());
+//                    log.debug("Current Frame Core: "+getCore());
+//
+//                    log.trace("Applying Evidence update equation...");
+//                    double updatedBel = (1 - newEvidenceWeight) * getBelief(prop) + newEvidenceWeight * newFrame.getFHConditionalBel(prop,conditioningEventA);
+//                    log.debug("Prop = "+prop+" , Bel ="+updatedBel);
+//                    updatedBeliefs.put(prop,updatedBel);
+//                }
+                // ****************************
+
+
+
+
+
+
+
+                // Update the frame with this new calculation.
+                clearMasses();
+                setBeliefs(updatedBeliefs);
+                System.out.println("updated Frame = "+this.toString());
+
+                return true;
+            }
+
+        } else{
+            return false;
+        }
+    }
+    //**********************************************************************//
+
+
+
+
+
+    //****************** IMPORTANT HELPERS **********************************************//
+
+    /**
+     * Generalized comparator between two lists. Without order constraints. [1,2] = [2,1]
+     * @param l1
+     * @param l2
+     * @param <T>
+     * @return
+     */
+    public <T> boolean listEqualsNoOrder(List<T> l1, List<T> l2) {
+        final Set<T> s1 = new HashSet<>(l1);
+        final Set<T> s2 = new HashSet<>(l2);
+
+        return s1.equals(s2);
+    }
+
+
+    /**
+     * Returns the complement of a proposition in the frame.
+     * helper method for plausibility
+     * @param proposition
+     * @return
+     */
+    public List<String> getComplement(List<String> proposition){
+        proposition.stream().map(string -> string.toLowerCase()); //NEW
+        // Create a bitset:
+        int location = accessMass(proposition);
+        BitSet bits = new BitSet(this.singletons.size());
+        int index = 0;
+        while (location != 0) {
+            if (location % 2 != 0) {
+                bits.set(index);
+            }
+            ++index;
+            location = location >>> 1;
+        }
+        bits.flip(0,this.singletons.size());
+        List<String> complement = new ArrayList<>();
+        for (int i = bits.nextSetBit(0); i != -1; i = bits.nextSetBit(i + 1)) {
+            complement.add(this.singletons.get(i));
+        }
+        return complement;
+    }
+
+    /**
+     * Returns a DSVector index of a proposition.
+     * Useful for various operations including setMass, etc.
+     * Algorithm obtained from Polpitiya paper 2017.
+     * @param proposition
+     * @return
+     */
+    public Integer accessMass(List<String> proposition){
+        proposition.stream().map(string -> string.toLowerCase()); //NEW
+        int index = 0;
+        for (String singleton : proposition){
+            try{
+                int i = this.singletons.indexOf(singleton);
+                index = index + power.get(i);
+            } catch (Exception e){
+                System.out.println("Error: One of the singletons in the proposition is not found in the frame");
+            }
+        }
+        return index;
+    }
+
+    /**
+     * Initializes lookup table called "power".
+     * Each index i in this lookup table contains the value 2^i.
+     * The lookup table is of size = number of singletons, and represents the position of the singleton masses in massesDSVector
+     */
+    private void initializePower(){
+        this.power = new ArrayList<>();
+        int powerVal = 1;
+        for (int i = 0; i < this.numberOfSingletons; i++){
+            this.power.add(powerVal);
+            powerVal *= 2;
+        }
+    }
+
+    /**
+     * Returns a power set of the input list. E.g., input = [a,b,c], output  = [[a],[b],[c],[a,b],[a,c],[b,c],[a,b,c]]
+     * @param input
+     * @return
+     * See http://bit.ly/2wQuf2b
+     */
+    public List<List<String>> getPowerSet(List<String> input) {
+        input.stream().map(string -> string.toLowerCase()); //NEW
+        int allMasks = 1 << input.size(); //shifts a 1 to the left n times, where n is the size of the input list.
+        List<List<String>> output = new ArrayList<>();
+        for(int i=0;i<allMasks;i++) {
+            List<String> sub = new ArrayList<>();
+            for(int j=0;j<input.size();j++) {
+                if((i & (1 << j)) > 0) {
+                    sub.add(input.get(j));
+                }
+            }
+            output.add(sub);
+        }
+        return output;
+    }
+
+    /**
+     * Generalized powerSet (we use this for calculating arbitrary union. see getArbUnion)
+     * http://rosettacode.org/wiki/Power_set#Java
+     * @param list
+     * @param <T>
+     * @return
+     */
+    public static <T> List<List<T>> getGenPowerSet(Collection<T> list) {
+        List<List<T>> ps = new ArrayList<List<T>>();
+        ps.add(new ArrayList<T>());   // add the empty set
+
+        // for every item in the original list
+        for (T item : list) {
+            List<List<T>> newPs = new ArrayList<List<T>>();
+
+            for (List<T> subset : ps) {
+                // copy all of the current powerset's subsets
+                newPs.add(subset);
+
+                // plus the subsets appended with the current item
+                List<T> newSubset = new ArrayList<T>(subset);
+                newSubset.add(item);
+                newPs.add(newSubset);
+            }
+
+            // powerset is now powerset of list.subList(0, list.indexOf(item)+1)
+            ps = newPs;
+        }
+        return ps;
+    }
+
+    /**
+     * Given two propositions, this method returns the intersection.
+     * @param propA
+     * @param propB
+     */
+    public List<String> getIntersection(List<String> propA, List<String> propB){
+        propA.stream().map(string -> string.toLowerCase()); //NEW
+        propB.stream().map(string -> string.toLowerCase()); //NEW
+        List<String> intersection = new ArrayList<>(propA);
+        intersection.retainAll(propB);
+        return intersection;
+    }
+
+    /**
+     * Given two propositions, this method returns the union.
+     * @param propA
+     * @param propB
+     * @return
+     */
+    public List<String> getUnion(List<String> propA, List<String> propB){
+        propA.stream().map(string -> string.toLowerCase()); //NEW
+        propB.stream().map(string -> string.toLowerCase()); //NEW
+        HashSet<String> set = new HashSet<>();
+        set.addAll(propA);
+        set.addAll(propB);
+        List<String> union = new ArrayList<>(set);
+        return union;
+    }
+
+    /**
+     * Generalized union of two lists
+     * @param list1
+     * @param list2
+     * @param <T>
+     * @return
+     */
+    public <T> List<T> getGenUnion(List<T> list1, List<T> list2) {
+        Set<T> set = new HashSet<T>();
+        set.addAll(list1);
+        set.addAll(list2);
+        return new ArrayList<T>(set);
+    }
+
+    /**
+     * returns the "inner set" of a conditioning event
+     * in(A) contains all the focal elements that are contained in propA
+     * @param propA
+     * @return
+     */
+    public List<List<String>> getIn(List<String> propA){
+        propA.stream().map(string -> string.toLowerCase()); //NEW
+        List<List<String>> in = new ArrayList<>();
+        Map<List<String>, Double> core = getCore();
+        for (Map.Entry <List<String>,Double> entry: core.entrySet()){
+            if(propA.containsAll(entry.getKey())){
+                in.add(entry.getKey());
+            }
+        }
+        return in;
+    }
+
+    /**
+     * returns the "outer set" of a conditioning event
+     * out(A) contains all the focal elements that intersect with propA but are not contained in propA.
+     * @param propA
+     * @return
+     */
+    public List<List<String>> getOut(List<String> propA){
+        propA.stream().map(string -> string.toLowerCase()); //NEW
+        List<List<String>> out = new ArrayList<>();
+        Set<List<String>> outSet = new HashSet<>();
+        Map<List<String>, Double> core = getCore(); // focal elements
+
+        for (Map.Entry <List<String>,Double> entry: core.entrySet()){
+            List<String> intersect = getIntersection(entry.getKey(),propA);
+            if (intersect.isEmpty() || propA.containsAll(entry.getKey())){
+            } else {
+                outSet.add(intersect);
+            }
+        }
+        out.addAll(outSet);
+        return out;
+    }
+
+    /**
+     * Returns an arbitrary union of a List of propositions.
+     * Useful for calculating OUT(A), which in turn is useful for calculating conditional core.
+     * @param input
+     * @return
+     */
+    public List<List<String>> getArbUnion(List<List<String>> listOfProps){
+        List<List<List<String>>> powerSet = getGenPowerSet(listOfProps);
+        Set<Set<String>> arbUnion = new HashSet<>();
+        for (List<List<String>> grouping : powerSet){
+            // We want to find the union of the elements in these grouping
+            // This grouping could be one or more elements.
+            if (!grouping.isEmpty()){
+                Set<String> union = new HashSet<>();
+                for (List<String> list : grouping) union.addAll(list);
+                if (!union.isEmpty()){
+                    // convert set to list and add to arbUnion
+                    arbUnion.add(union);
+                }
+            }
+        }
+
+        // Converting from set to list
+        List<List<String>> arbUnionList = new ArrayList<>();
+        for (Set<String> elements : arbUnion){
+            // convert to list
+            List<String> unionList = new ArrayList<>(elements);
+            arbUnionList.add(unionList);
+        }
+
+        return arbUnionList;
+
+    }
+
+
+    /**
+     * Helper method does a weighted addition of two maps on duplicate keys
+     * Returns w1*a + w2*b
+     * @param a
+     * @param b
+     * @return
+     */
+    public Map<List<String>,Double> weightedAddValues(Map<List<String>,Double> a, Map<List<String>,Double> b, double w1, double w2) {
+        Map<List<String>,Double> ret = new HashMap<List<String>,Double>(a);
+
+        for (Map.Entry<List<String>,Double> entry : ret.entrySet()){
+            double update = w1 * entry.getValue();
+            ret.put(entry.getKey(),update);
+        }
+
+        for (List<String> s : b.keySet()) {
+            if (ret.containsKey(s)) {
+                ret.put(s, w2*b.get(s) + ret.get(s));
+            } else {
+                ret.put(s, w2*b.get(s));
+            }
+        }
+        return ret;
+    }
+
+
+    //*********************************************************************************//
+
+
+    /**
+     * Basic toString method that displays the Core of the FoD with masses, beliefs and plausibilities.
+     * @return
+     */
+    public String toString() {
+        String retStr = "FoD Core (Begin) {Prop : normalized mass : belief : plausibility}:\n";
+        Map<List<String>,Double> core = this.getCore();
+        for (Map.Entry<List<String>,Double> entry : core.entrySet()) {
+            retStr += entry.getKey() + " \t\t : " + entry.getValue()/this.getNormalizingConstant() + "\t : " +
+                    this.getBelief(entry.getKey())+ "\t : " + this.getPlausibility(entry.getKey()) + "\n";
+        }
+        retStr += "FoD Core (End)\n";
+        return retStr;
+    }
+
+}
+
+// TODO: getCore(): Maybe "core" should not be a Map<List<String>,Double>, but instead a Map<Set<String>,Double>
